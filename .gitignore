@@ -1,0 +1,25 @@
+# Python 虚拟环境
+.venv/
+venv/
+env/
+
+# PyCharm IDE 配置
+.idea/
+
+# Python 编译文件
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info
+
+# 日志文件
+*.log
+
+# 数据库文件
+*.db
+*.sqlite3
+
+# 临时文件
+*.tmp
+*.temp
