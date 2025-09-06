@@ -852,7 +852,7 @@ print("="*60)
 print("\n=== 第九步：保存图表和数据文件 ===")
 
 # 创建输出目录
-output_dir = "../../ImageOutput/01"
+output_dir = "../ImageOutput/01"
 os.makedirs(output_dir, exist_ok=True)
 
 # 保存3D轨迹图
