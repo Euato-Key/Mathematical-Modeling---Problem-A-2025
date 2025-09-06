@@ -1,591 +1,375 @@
-# %% [markdown]
-# # 问题1：单弹固定参数分析
-# 
-# ## 问题描述
-# - 无人机：FY1
-# - 速度：120m/s（朝假目标方向）
-# - 投放时间：受领任务1.5秒后
-# - 起爆时间：投放后3.6秒
-# - 要求：计算对M1的有效遮蔽时长
+"""
+问题1：烟幕干扰弹对M1的有效遮蔽时长计算
+基于03-01-A1-P1-单弹固定参数分析.md的建模思路
 
-# %%
+使用固定参数：
+- 无人机FY1以120 m/s速度朝向假目标飞行
+- 受领任务1.5s后投放烟幕弹
+- 投放后3.6s起爆
+- 计算对M1的有效遮蔽时长
+"""
+
 import numpy as np
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
+import matplotlib.pyplot as plt
+from typing import Tuple, List, Union, Optional
 import pandas as pd
-import json
-from datetime import datetime
-import os
 
-# 确保输出目录存在
-output_dir = "../../ImageOutput/01"
-os.makedirs(output_dir, exist_ok=True)
+# ============================================================================
+# 第一步：定义基本参数和常量
+# ============================================================================
 
-print("🚀 问题1：单弹固定参数分析")
-print("=" * 50)
+print("=== 第一步：定义基本参数 ===")
 
-# %% [markdown]
-# ## 1. 物理参数定义
+# 物理常量
+g = 9.8  # 重力加速度 m/s²
+smoke_sink_speed = 3.0  # 烟幕云团下沉速度 m/s
+effective_radius = 10.0  # 有效遮蔽半径 m
+effective_duration = 20.0  # 有效遮蔽持续时间 s
 
-# %%
-class Problem1Solver:
-    def __init__(self):
-        """初始化问题1求解器"""
-        # 物理常量
-        self.g = 9.8  # 重力加速度 m/s²
-        self.R = 10.0  # 烟幕有效遮蔽半径 m
-        self.v_sink = 3.0  # 云团下沉速度 m/s
-        self.smoke_duration = 20.0  # 烟幕有效时间 s
-        
-        # 导弹参数
-        self.M0 = np.array([20000.0, 0.0, 2000.0])  # M1初始位置
-        self.v_m = 300.0  # 导弹速度 m/s
-        
-        # 无人机FY1参数
-        self.U0 = np.array([17800.0, 0.0, 1800.0])  # FY1初始位置
-        self.v_u = 120.0  # 无人机速度 m/s
-        
-        # 真目标参数
-        self.T = np.array([0.0, 200.0, 5.0])  # 真目标中心位置
-        
-        # 时间参数
-        self.t_r = 1.5  # 投放时间 s
-        self.delta_f = 3.6  # 起爆延时 s
-        self.t_e = self.t_r + self.delta_f  # 起爆时刻 s
-        
-        print(f"📊 物理参数初始化完成")
-        print(f"   导弹M1初始位置: {self.M0}")
-        print(f"   无人机FY1初始位置: {self.U0}")
-        print(f"   真目标位置: {self.T}")
-        print(f"   投放时刻: {self.t_r}s, 起爆时刻: {self.t_e}s")
+# 导弹参数
+missile_speed = 300.0  # 导弹速度 m/s
+M1_initial = np.array([20000.0, 0.0, 2000.0])  # 导弹M1初始位置
 
-# 创建求解器实例
-solver = Problem1Solver()
+# 无人机参数
+FY1_initial = np.array([17800.0, 0.0, 1800.0])  # 无人机FY1初始位置
+drone_speed = 120.0  # 无人机速度 m/s
 
-# %% [markdown]
-# ## 2. 运动学方程计算
+# 目标位置
+fake_target = np.array([0.0, 0.0, 0.0])  # 假目标位置
+real_target = np.array([0.0, 200.0, 0.0])  # 真目标位置
 
-# %%
-def compute_trajectories(solver):
-    """计算各物体的运动轨迹"""
-    
-    # 1. 计算单位向量
-    # 导弹朝向假目标（原点）
-    hat_u_m = -solver.M0 / np.linalg.norm(solver.M0)
-    
-    # 无人机朝向假目标（原点）
-    hat_u_u = -solver.U0 / np.linalg.norm(solver.U0)
-    
-    # 2. 计算投放点
-    S0 = solver.U0 + solver.v_u * hat_u_u * solver.t_r
-    
-    # 3. 计算起爆位置（云团初心）
-    v_s = solver.v_u * hat_u_u  # 弹体初速度
-    C0 = S0 + v_s * solver.delta_f + 0.5 * np.array([0, 0, -solver.g]) * solver.delta_f**2
-    
-    print(f"🎯 轨迹计算结果:")
-    print(f"   导弹单位向量: {hat_u_m}")
-    print(f"   无人机单位向量: {hat_u_u}")
-    print(f"   投放点S0: {S0}")
-    print(f"   起爆位置C0: {C0}")
-    
-    return hat_u_m, hat_u_u, S0, C0
+# 时间参数
+t_deploy = 1.5  # 投放时间 s
+t_explode_delay = 3.6  # 起爆延迟 s
+t_explode = t_deploy + t_explode_delay  # 起爆时间 s
 
-# 计算轨迹参数
-hat_u_m, hat_u_u, S0, C0 = compute_trajectories(solver)
+print(f"导弹M1初始位置: {M1_initial}")
+print(f"无人机FY1初始位置: {FY1_initial}")
+print(f"投放时间: {t_deploy}s")
+print(f"起爆时间: {t_explode}s")
 
-# %% [markdown]
-# ## 3. 遮蔽判定函数
+# ============================================================================
+# 第二步：计算导弹运动模型
+# ============================================================================
 
-# %%
-def compute_shielding_distance(t, solver, hat_u_m, C0):
-    """计算时刻t的遮蔽距离"""
+print("\n=== 第二步：导弹运动模型 ===")
+
+def calculate_missile_velocity(initial_pos: np.ndarray, target_pos: np.ndarray, speed: float) -> np.ndarray:
+    """计算导弹速度向量"""
+    direction = target_pos - initial_pos
+    unit_direction = direction / np.linalg.norm(direction)
+    return speed * unit_direction
+
+def missile_position(t: float, initial_pos: np.ndarray, velocity: np.ndarray) -> np.ndarray:
+    """计算导弹在时刻t的位置"""
+    return initial_pos + velocity * t
+
+# 计算导弹M1的速度向量
+missile_velocity = calculate_missile_velocity(M1_initial, fake_target, missile_speed)
+print(f"导弹速度向量: {missile_velocity}")
+
+# 计算导弹速度分量
+missile_norm = np.linalg.norm(M1_initial)
+print(f"导弹初始位置模长: {missile_norm:.2f} m")
+print(f"导弹速度分量: vx={missile_velocity[0]:.3f}, vy={missile_velocity[1]:.3f}, vz={missile_velocity[2]:.3f}")
+
+# ============================================================================
+# 第三步：计算无人机运动模型
+# ============================================================================
+
+print("\n=== 第三步：无人机运动模型 ===")
+
+def calculate_drone_velocity_horizontal(initial_pos: np.ndarray, target_pos: np.ndarray, speed: float) -> np.ndarray:
+    """计算无人机水平方向速度向量（等高度飞行）"""
+    # 只考虑xy平面的方向
+    direction_2d = target_pos[:2] - initial_pos[:2]
+    unit_direction_2d = direction_2d / np.linalg.norm(direction_2d)
+    velocity_3d = np.array([unit_direction_2d[0], unit_direction_2d[1], 0.0]) * speed
+    return velocity_3d
+
+def drone_position(t: float, initial_pos: np.ndarray, velocity: np.ndarray) -> np.ndarray:
+    """计算无人机在时刻t的位置"""
+    return initial_pos + velocity * t
+
+# 计算无人机FY1的速度向量
+drone_velocity = calculate_drone_velocity_horizontal(FY1_initial, fake_target, drone_speed)
+print(f"无人机速度向量: {drone_velocity}")
+
+# 验证无人机在投放时刻的位置
+deploy_position = drone_position(t_deploy, FY1_initial, drone_velocity)
+print(f"投放时刻无人机位置: {deploy_position}")
+
+# ============================================================================
+# 第四步：计算烟幕弹运动模型
+# ============================================================================
+
+print("\n=== 第四步：烟幕弹运动模型 ===")
+
+def smoke_bomb_position(t: float, deploy_time: float, deploy_pos: np.ndarray, 
+                       initial_velocity: np.ndarray) -> np.ndarray:
+    """计算烟幕弹在时刻t的位置（考虑重力）"""
+    if t < deploy_time:
+        return deploy_pos  # 投放前位置不变
     
-    # 导弹位置
-    M_t = solver.M0 + solver.v_m * hat_u_m * t
+    dt = t - deploy_time
+    # 水平方向保持初始速度，竖直方向受重力影响
+    horizontal_displacement = initial_velocity[:2] * dt
+    vertical_displacement = initial_velocity[2] * dt - 0.5 * g * dt**2
     
-    # 云团位置（仅在有效期内）
-    if t < solver.t_e or t > solver.t_e + solver.smoke_duration:
-        return float('inf')  # 无效时间
+    position = deploy_pos.copy()
+    position[:2] += horizontal_displacement
+    position[2] += vertical_displacement
     
-    C_t = C0 + np.array([0, 0, -solver.v_sink]) * (t - solver.t_e)
+    return position
+
+# 计算起爆位置
+explode_position = smoke_bomb_position(t_explode, t_deploy, deploy_position, drone_velocity)
+print(f"起爆位置: {explode_position}")
+
+# 验证起爆高度计算
+fall_time = t_explode_delay
+fall_distance = 0.5 * g * fall_time**2
+print(f"自由落体时间: {fall_time}s")
+print(f"下降距离: {fall_distance:.3f}m")
+print(f"起爆高度: {explode_position[2]:.3f}m")
+
+# ============================================================================
+# 第五步：计算烟幕云团运动模型
+# ============================================================================
+
+print("\n=== 第五步：烟幕云团运动模型 ===")
+
+def smoke_cloud_position(t: float, explode_time: float, explode_pos: np.ndarray) -> Optional[np.ndarray]:
+    """计算烟幕云团在时刻t的位置"""
+    if t < explode_time:
+        return None  # 未起爆
     
-    # 计算点到线段的最短距离
-    # 导弹到目标的向量
-    MT = solver.T - M_t
-    MC = C_t - M_t
+    dt = t - explode_time
+    if dt > effective_duration:
+        return None  # 超过有效时间
+    
+    # 云团以3 m/s速度下沉
+    position = explode_pos.copy()
+    position[2] -= smoke_sink_speed * dt
+    
+    return position
+
+# 测试云团位置计算
+test_times = [t_explode, t_explode + 5, t_explode + 10, t_explode + 20]
+print("云团位置测试:")
+for t in test_times:
+    pos = smoke_cloud_position(t, t_explode, explode_position)
+    if pos is not None:
+        print(f"t={t:.1f}s: {pos}")
+
+# ============================================================================
+# 第六步：遮蔽条件几何计算
+# ============================================================================
+
+print("\n=== 第六步：遮蔽条件几何计算 ===")
+
+def point_to_line_segment_distance(point: np.ndarray, line_start: np.ndarray, 
+                                 line_end: np.ndarray) -> Tuple[float, float]:
+    """
+    计算点到线段的最短距离
+    返回: (距离, 投影参数u)
+    """
+    # 向量计算
+    AB = line_end - line_start
+    AP = point - line_start
     
     # 投影参数
-    if np.dot(MT, MT) == 0:  # 避免除零
-        return np.linalg.norm(MC)
+    AB_squared = np.dot(AB, AB)
+    if AB_squared == 0:
+        return float(np.linalg.norm(AP)), 0.0
     
-    s_star = np.dot(MC, MT) / np.dot(MT, MT)
-    s_clamp = np.clip(s_star, 0, 1)
+    u = float(np.dot(AP, AB) / AB_squared)
     
-    # 最近点
-    P_t = M_t + s_clamp * MT
+    # 计算距离
+    if u < 0:
+        # 最近点在线段起点之外
+        distance = float(np.linalg.norm(AP))
+    elif u > 1:
+        # 最近点在线段终点之外
+        BP = point - line_end
+        distance = float(np.linalg.norm(BP))
+    else:
+        # 最近点在线段上
+        cross_product = np.cross(AP, AB)
+        if AB.ndim == 1 and len(AB) == 3:
+            distance = float(np.linalg.norm(cross_product) / np.linalg.norm(AB))
+        else:
+            distance = float(abs(cross_product) / np.linalg.norm(AB))
     
-    # 距离
-    d_t = np.linalg.norm(C_t - P_t)
+    return distance, u
+
+def is_shielded(t: float, explode_time: float, explode_pos: np.ndarray,
+               missile_initial: np.ndarray, missile_vel: np.ndarray,
+               target_pos: np.ndarray, radius: float) -> Tuple[bool, dict]:
+    """
+    判断在时刻t是否被遮蔽
+    返回: (是否遮蔽, 详细信息字典)
+    """
+    # 检查云团是否有效
+    if t < explode_time or t > explode_time + effective_duration:
+        return False, {"reason": "云团无效"}
     
-    return d_t
+    # 计算各位置
+    missile_pos = missile_position(t, missile_initial, missile_vel)
+    cloud_pos = smoke_cloud_position(t, explode_time, explode_pos)
+    
+    if cloud_pos is None:
+        return False, {"reason": "云团位置无效"}
+    
+    # 计算点到线段距离
+    distance, u = point_to_line_segment_distance(cloud_pos, missile_pos, target_pos)
+    
+    # 判断遮蔽条件
+    is_blocked = distance <= radius and 0 <= u <= 1
+    
+    info = {
+        "time": t,
+        "missile_pos": missile_pos,
+        "cloud_pos": cloud_pos,
+        "target_pos": target_pos,
+        "distance": distance,
+        "projection_u": u,
+        "is_blocked": is_blocked
+    }
+    
+    return is_blocked, info
 
-def is_shielded(t, solver, hat_u_m, C0):
-    """判断时刻t是否被遮蔽"""
-    d = compute_shielding_distance(t, solver, hat_u_m, C0)
-    return d <= solver.R
+# 测试遮蔽判定
+print("遮蔽判定测试:")
+test_time = t_explode + 5
+blocked, info = is_shielded(test_time, t_explode, explode_position,
+                           M1_initial, missile_velocity, real_target, effective_radius)
+print(f"t={test_time}s: 遮蔽={blocked}")
+print(f"距离={info['distance']:.3f}m, 投影参数u={info['projection_u']:.3f}")
 
-print("✅ 遮蔽判定函数定义完成")
+# ============================================================================
+# 第七步：数值求解有效遮蔽时长
+# ============================================================================
 
-# %% [markdown]
-# ## 4. 数值求解遮蔽时长
+print("\n=== 第七步：数值求解有效遮蔽时长 ===")
 
-# %%
-def solve_shielding_duration(solver, hat_u_m, C0, dt=0.01):
-    """数值求解遮蔽时长"""
+def calculate_shielding_duration(explode_time: float, explode_pos: np.ndarray,
+                               missile_initial: np.ndarray, missile_vel: np.ndarray,
+                               target_pos: np.ndarray, radius: float,
+                               dt: float = 0.01) -> Tuple[float, List[dict]]:
+    """
+    数值计算有效遮蔽时长
+    返回: (总遮蔽时长, 详细记录列表)
+    """
+    # 时间范围
+    t_start = explode_time
+    t_end = explode_time + effective_duration
     
     # 时间采样
-    t_start = solver.t_e
-    t_end = solver.t_e + solver.smoke_duration
-    times = np.arange(t_start, t_end + dt, dt)
+    time_points = np.arange(t_start, t_end + dt, dt)
     
-    # 计算每个时刻的距离和遮蔽状态
-    distances = []
-    shielded_flags = []
+    shielded_count = 0
+    detailed_records = []
     
-    for t in times:
-        d = compute_shielding_distance(t, solver, hat_u_m, C0)
-        distances.append(d)
-        shielded_flags.append(d <= solver.R)
-    
-    distances = np.array(distances)
-    shielded_flags = np.array(shielded_flags)
-    
-    # 计算遮蔽时长
-    shielded_count = np.sum(shielded_flags)
-    total_shielding_time = shielded_count * dt
-    
-    # 找到遮蔽区间
-    shielded_intervals = []
-    in_interval = False
-    interval_start = None
-    
-    for i, (t, shielded) in enumerate(zip(times, shielded_flags)):
-        if shielded and not in_interval:
-            # 开始遮蔽
-            interval_start = t
-            in_interval = True
-        elif not shielded and in_interval:
-            # 结束遮蔽
-            shielded_intervals.append((interval_start, times[i-1]))
-            in_interval = False
-    
-    # 处理最后一个区间
-    if in_interval:
-        shielded_intervals.append((interval_start, times[-1]))
-    
-    print(f"🎯 遮蔽分析结果:")
-    print(f"   时间步长: {dt}s")
-    print(f"   分析时间范围: {t_start:.1f}s - {t_end:.1f}s")
-    print(f"   总遮蔽时长: {total_shielding_time:.3f}s")
-    print(f"   遮蔽区间数量: {len(shielded_intervals)}")
-    
-    for i, (start, end) in enumerate(shielded_intervals):
-        print(f"   区间{i+1}: {start:.3f}s - {end:.3f}s (时长: {end-start:.3f}s)")
-    
-    return {
-        'times': times,
-        'distances': distances,
-        'shielded_flags': shielded_flags,
-        'total_shielding_time': total_shielding_time,
-        'shielded_intervals': shielded_intervals,
-        'dt': dt
-    }
-
-# 求解遮蔽时长
-result = solve_shielding_duration(solver, hat_u_m, C0)
-
-# %% [markdown]
-# ## 5. 3D轨迹可视化
-
-# %%
-def create_3d_trajectory_plot(solver, hat_u_m, hat_u_u, S0, C0, result):
-    """创建3D轨迹可视化"""
-    
-    fig = go.Figure()
-    
-    # 时间范围
-    t_max = 30.0
-    t_trajectory = np.linspace(0, t_max, 200)
-    
-    # 导弹轨迹
-    missile_trajectory = np.array([solver.M0 + solver.v_m * hat_u_m * t for t in t_trajectory])
-    fig.add_trace(go.Scatter3d(
-        x=missile_trajectory[:, 0],
-        y=missile_trajectory[:, 1],
-        z=missile_trajectory[:, 2],
-        mode='lines',
-        line=dict(color='red', width=6),
-        name='导弹M1轨迹',
-        hovertemplate='<b>导弹M1</b><br>坐标: (%{x:.0f}, %{y:.0f}, %{z:.0f})<extra></extra>'
-    ))
-    
-    # 无人机轨迹（到投放点）
-    t_drone = np.linspace(0, solver.t_r, 50)
-    drone_trajectory = np.array([solver.U0 + solver.v_u * hat_u_u * t for t in t_drone])
-    fig.add_trace(go.Scatter3d(
-        x=drone_trajectory[:, 0],
-        y=drone_trajectory[:, 1],
-        z=drone_trajectory[:, 2],
-        mode='lines',
-        line=dict(color='blue', width=6),
-        name='无人机FY1轨迹',
-        hovertemplate='<b>无人机FY1</b><br>坐标: (%{x:.0f}, %{y:.0f}, %{z:.0f})<extra></extra>'
-    ))
-    
-    # 烟幕弹轨迹（投放到起爆）
-    t_smoke = np.linspace(solver.t_r, solver.t_e, 50)
-    smoke_trajectory = []
-    for t in t_smoke:
-        pos = S0 + solver.v_u * hat_u_u * (t - solver.t_r) + 0.5 * np.array([0, 0, -solver.g]) * (t - solver.t_r)**2
-        smoke_trajectory.append(pos)
-    smoke_trajectory = np.array(smoke_trajectory)
-    
-    fig.add_trace(go.Scatter3d(
-        x=smoke_trajectory[:, 0],
-        y=smoke_trajectory[:, 1],
-        z=smoke_trajectory[:, 2],
-        mode='lines',
-        line=dict(color='orange', width=4, dash='dash'),
-        name='烟幕弹轨迹',
-        hovertemplate='<b>烟幕弹</b><br>坐标: (%{x:.0f}, %{y:.0f}, %{z:.0f})<extra></extra>'
-    ))
-    
-    # 云团轨迹（起爆后下沉）
-    t_cloud = np.linspace(solver.t_e, solver.t_e + solver.smoke_duration, 100)
-    cloud_trajectory = np.array([C0 + np.array([0, 0, -solver.v_sink]) * (t - solver.t_e) for t in t_cloud])
-    fig.add_trace(go.Scatter3d(
-        x=cloud_trajectory[:, 0],
-        y=cloud_trajectory[:, 1],
-        z=cloud_trajectory[:, 2],
-        mode='lines',
-        line=dict(color='gray', width=8),
-        name='云团中心轨迹',
-        hovertemplate='<b>云团中心</b><br>坐标: (%{x:.0f}, %{y:.0f}, %{z:.0f})<extra></extra>'
-    ))
-    
-    # 关键点标记
-    # 初始位置
-    fig.add_trace(go.Scatter3d(
-        x=[solver.M0[0]], y=[solver.M0[1]], z=[solver.M0[2]],
-        mode='markers',
-        marker=dict(size=12, color='red', symbol='diamond'),
-        name='M1初始位置',
-        hovertemplate='<b>M1初始位置</b><br>坐标: (%{x:.0f}, %{y:.0f}, %{z:.0f})<extra></extra>'
-    ))
-    
-    fig.add_trace(go.Scatter3d(
-        x=[solver.U0[0]], y=[solver.U0[1]], z=[solver.U0[2]],
-        mode='markers',
-        marker=dict(size=10, color='blue', symbol='circle'),
-        name='FY1初始位置',
-        hovertemplate='<b>FY1初始位置</b><br>坐标: (%{x:.0f}, %{y:.0f}, %{z:.0f})<extra></extra>'
-    ))
-    
-    # 投放点
-    fig.add_trace(go.Scatter3d(
-        x=[S0[0]], y=[S0[1]], z=[S0[2]],
-        mode='markers',
-        marker=dict(size=8, color='orange', symbol='square'),
-        name='投放点',
-        hovertemplate='<b>投放点</b><br>坐标: (%{x:.0f}, %{y:.0f}, %{z:.0f})<extra></extra>'
-    ))
-    
-    # 起爆点
-    fig.add_trace(go.Scatter3d(
-        x=[C0[0]], y=[C0[1]], z=[C0[2]],
-        mode='markers',
-        marker=dict(size=10, color='purple', symbol='diamond'),
-        name='起爆点',
-        hovertemplate='<b>起爆点</b><br>坐标: (%{x:.0f}, %{y:.0f}, %{z:.0f})<extra></extra>'
-    ))
-    
-    # 真目标
-    fig.add_trace(go.Scatter3d(
-        x=[solver.T[0]], y=[solver.T[1]], z=[solver.T[2]],
-        mode='markers',
-        marker=dict(size=15, color='green', symbol='cross'),
-        name='真目标',
-        hovertemplate='<b>真目标</b><br>坐标: (%{x:.0f}, %{y:.0f}, %{z:.0f})<extra></extra>'
-    ))
-    
-    # 假目标（原点）
-    fig.add_trace(go.Scatter3d(
-        x=[0], y=[0], z=[0],
-        mode='markers',
-        marker=dict(size=12, color='black', symbol='x'),
-        name='假目标',
-        hovertemplate='<b>假目标</b><br>坐标: (0, 0, 0)<extra></extra>'
-    ))
-    
-    # 设置布局
-    fig.update_layout(
-        title=dict(
-            text='🚀 问题1：3D轨迹可视化<br><sub>单弹固定参数分析</sub>',
-            x=0.5,
-            font=dict(size=20, color='darkblue')
-        ),
-        scene=dict(
-            xaxis_title='X坐标 (m)',
-            yaxis_title='Y坐标 (m)',
-            zaxis_title='Z坐标 (m)',
-            camera=dict(
-                eye=dict(x=1.5, y=1.5, z=1.2)
-            ),
-            aspectmode='manual',
-            aspectratio=dict(x=2, y=1, z=0.5)
-        ),
-        width=1200,
-        height=800,
-        showlegend=True,
-        legend=dict(
-            yanchor="top",
-            y=0.99,
-            xanchor="left",
-            x=0.01
-        )
-    )
-    
-    return fig
-
-# 创建3D轨迹图
-fig_3d = create_3d_trajectory_plot(solver, hat_u_m, hat_u_u, S0, C0, result)
-fig_3d.show()
-
-# 保存图像
-fig_3d.write_html(f"{output_dir}/01_3d_trajectory.html")
-fig_3d.write_image(f"{output_dir}/01_3d_trajectory.svg")
-print(f"💾 3D轨迹图已保存到 {output_dir}/01_3d_trajectory.html")
-
-# %% [markdown]
-# ## 6. 遮蔽距离时间序列分析
-
-# %%
-def create_shielding_analysis_plot(result, solver):
-    """创建遮蔽分析图表"""
-    
-    fig = make_subplots(
-        rows=2, cols=1,
-        subplot_titles=('云团与导弹-目标视线的距离随时间变化', '遮蔽状态时间序列'),
-        vertical_spacing=0.12,
-        specs=[[{"secondary_y": False}], [{"secondary_y": False}]]
-    )
-    
-    times = result['times']
-    distances = result['distances']
-    shielded_flags = result['shielded_flags']
-    
-    # 第一个子图：距离曲线
-    fig.add_trace(
-        go.Scatter(
-            x=times,
-            y=distances,
-            mode='lines',
-            line=dict(color='blue', width=2),
-            name='距离d(t)',
-            hovertemplate='时间: %{x:.2f}s<br>距离: %{y:.2f}m<extra></extra>'
-        ),
-        row=1, col=1
-    )
-    
-    # 遮蔽阈值线
-    fig.add_trace(
-        go.Scatter(
-            x=[times[0], times[-1]],
-            y=[solver.R, solver.R],
-            mode='lines',
-            line=dict(color='red', width=2, dash='dash'),
-            name=f'遮蔽阈值 R={solver.R}m',
-            hovertemplate='遮蔽阈值: %{y}m<extra></extra>'
-        ),
-        row=1, col=1
-    )
-    
-    # 遮蔽区域填充
-    shielded_distances = np.where(shielded_flags, distances, np.nan)
-    fig.add_trace(
-        go.Scatter(
-            x=times,
-            y=shielded_distances,
-            mode='lines',
-            line=dict(color='green', width=3),
-            name='有效遮蔽区间',
-            fill='tonexty',
-            fillcolor='rgba(0,255,0,0.2)',
-            hovertemplate='时间: %{x:.2f}s<br>遮蔽距离: %{y:.2f}m<extra></extra>'
-        ),
-        row=1, col=1
-    )
-    
-    # 第二个子图：遮蔽状态
-    fig.add_trace(
-        go.Scatter(
-            x=times,
-            y=np.array(shielded_flags).astype(int),
-            mode='lines',
-            line=dict(color='green', width=3),
-            name='遮蔽状态',
-            fill='tozeroy',
-            fillcolor='rgba(0,255,0,0.3)',
-            hovertemplate='时间: %{x:.2f}s<br>遮蔽状态: %{y}<extra></extra>'
-        ),
-        row=2, col=1
-    )
-    
-    # 标记遮蔽区间
-    for i, (start, end) in enumerate(result['shielded_intervals']):
-        fig.add_vrect(
-            x0=start, x1=end,
-            fillcolor="green", opacity=0.2,
-            layer="below", line_width=0,
-            row="1", col="1"
-        )
+    for t in time_points:
+        blocked, info = is_shielded(float(t), explode_time, explode_pos,
+                                  missile_initial, missile_vel, target_pos, radius)
         
-        # 添加区间标注
-        mid_time = (start + end) / 2
-        fig.add_annotation(
-            x=mid_time,
-            y=solver.R * 0.5,
-            text=f"区间{i+1}<br>{end-start:.3f}s",
-            showarrow=True,
-            arrowhead=2,
-            arrowcolor="green",
-            font=dict(color="green", size=10),
-            row="1", col="1"
-        )
+        if blocked:
+            shielded_count += 1
+            detailed_records.append(info)
     
-    # 更新布局
-    fig.update_layout(
-        title=dict(
-            text=f'📊 遮蔽效果分析<br><sub>总遮蔽时长: {result["total_shielding_time"]:.3f}s</sub>',
-            x=0.5,
-            font=dict(size=18, color='darkblue')
-        ),
-        height=800,
-        showlegend=True,
-        hovermode='x unified'
-    )
+    total_duration = shielded_count * dt
     
-    # 更新坐标轴
-    fig.update_xaxes(title_text="时间 (s)", row=1, col=1)
-    fig.update_yaxes(title_text="距离 (m)", row=1, col=1)
-    fig.update_xaxes(title_text="时间 (s)", row=2, col=1)
-    fig.update_yaxes(title_text="遮蔽状态", row=2, col=1, tickvals=[0, 1], ticktext=['未遮蔽', '遮蔽'])
+    return total_duration, detailed_records
+
+# 计算有效遮蔽时长
+print("开始数值计算...")
+shielding_duration, records = calculate_shielding_duration(
+    t_explode, explode_position, M1_initial, missile_velocity, 
+    real_target, effective_radius
+)
+
+print(f"\n=== 计算结果 ===")
+print(f"有效遮蔽时长: {shielding_duration:.3f} 秒")
+print(f"遮蔽记录数量: {len(records)}")
+
+if records:
+    print(f"遮蔽开始时间: {records[0]['time']:.3f}s")
+    print(f"遮蔽结束时间: {records[-1]['time']:.3f}s")
     
-    return fig
+    # 统计信息
+    distances = [r['distance'] for r in records]
+    print(f"最小遮蔽距离: {min(distances):.3f}m")
+    print(f"最大遮蔽距离: {max(distances):.3f}m")
+    print(f"平均遮蔽距离: {np.mean(distances):.3f}m")
 
-# 创建遮蔽分析图
-fig_analysis = create_shielding_analysis_plot(result, solver)
-fig_analysis.show()
+# ============================================================================
+# 第八步：结果验证和分析
+# ============================================================================
 
-# 保存图像
-fig_analysis.write_html(f"{output_dir}/02_shielding_analysis.html")
-fig_analysis.write_image(f"{output_dir}/02_shielding_analysis.svg")
-print(f"💾 遮蔽分析图已保存到 {output_dir}/02_shielding_analysis.html")
+print("\n=== 第八步：结果验证和分析 ===")
 
-# %% [markdown]
-# ## 7. 结果汇总与保存
+# 关键时间点验证
+key_times = {
+    "投放时间": t_deploy,
+    "起爆时间": t_explode,
+    "云团消失时间": t_explode + effective_duration
+}
 
-# %%
-def create_results_summary(solver, result, hat_u_m, hat_u_u, S0, C0):
-    """创建结果汇总"""
-    
-    summary = {
-        "问题": "问题1：单弹固定参数分析",
-        "计算时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "物理参数": {
-            "导弹M1初始位置": solver.M0.tolist(),
-            "导弹速度": f"{solver.v_m} m/s",
-            "无人机FY1初始位置": solver.U0.tolist(),
-            "无人机速度": f"{solver.v_u} m/s",
-            "真目标位置": solver.T.tolist(),
-            "投放时间": f"{solver.t_r} s",
-            "起爆延时": f"{solver.delta_f} s",
-            "起爆时刻": f"{solver.t_e} s",
-            "烟幕有效半径": f"{solver.R} m",
-            "烟幕有效时间": f"{solver.smoke_duration} s",
-            "云团下沉速度": f"{solver.v_sink} m/s"
-        },
-        "计算结果": {
-            "导弹单位向量": hat_u_m.tolist(),
-            "无人机单位向量": hat_u_u.tolist(),
-            "投放点坐标": S0.tolist(),
-            "起爆点坐标": C0.tolist(),
-            "总遮蔽时长": f"{result['total_shielding_time']:.6f} s",
-            "遮蔽区间数量": len(result['shielded_intervals']),
-            "遮蔽区间详情": [
-                {
-                    "区间": i+1,
-                    "开始时间": f"{start:.6f} s",
-                    "结束时间": f"{end:.6f} s",
-                    "持续时间": f"{end-start:.6f} s"
-                }
-                for i, (start, end) in enumerate(result['shielded_intervals'])
-            ],
-            "数值计算参数": {
-                "时间步长": f"{result['dt']} s",
-                "分析时间范围": f"{solver.t_e:.1f}s - {solver.t_e + solver.smoke_duration:.1f}s"
-            }
-        }
+print("关键时间点:")
+for name, time in key_times.items():
+    print(f"{name}: {time:.1f}s")
+
+# 关键位置验证
+print("\n关键位置:")
+print(f"投放位置: {deploy_position}")
+print(f"起爆位置: {explode_position}")
+
+final_cloud_pos = smoke_cloud_position(t_explode + effective_duration, t_explode, explode_position)
+if final_cloud_pos is not None:
+    print(f"云团最终位置: {final_cloud_pos}")
+
+# 导弹轨迹关键点
+missile_at_explode = missile_position(t_explode, M1_initial, missile_velocity)
+missile_at_end = missile_position(t_explode + effective_duration, M1_initial, missile_velocity)
+
+print(f"\n导弹轨迹:")
+print(f"起爆时导弹位置: {missile_at_explode}")
+print(f"云团消失时导弹位置: {missile_at_end}")
+
+# 计算导弹到达假目标的时间
+missile_to_target_distance = np.linalg.norm(M1_initial)
+time_to_target = missile_to_target_distance / missile_speed
+print(f"\n导弹到达假目标时间: {time_to_target:.1f}s")
+
+print(f"\n=== 最终答案 ===")
+print(f"烟幕干扰弹对M1的有效遮蔽时长: {shielding_duration:.3f} 秒")
+
+# ============================================================================
+# 第九步：保存计算结果（可选）
+# ============================================================================
+
+print("\n=== 第九步：保存计算结果 ===")
+
+# 创建结果摘要
+result_summary = {
+    "问题": "问题1 - 单弹固定参数分析",
+    "有效遮蔽时长(秒)": round(shielding_duration, 3),
+    "投放时间(秒)": t_deploy,
+    "起爆时间(秒)": t_explode,
+    "起爆位置": explode_position.tolist(),
+    "遮蔽记录数量": len(records),
+    "计算参数": {
+        "时间步长": 0.01,
+        "有效半径": effective_radius,
+        "有效持续时间": effective_duration
     }
-    
-    return summary
+}
 
-# 创建结果汇总
-summary = create_results_summary(solver, result, hat_u_m, hat_u_u, S0, C0)
+print("结果摘要:")
+for key, value in result_summary.items():
+    if key != "计算参数":
+        print(f"{key}: {value}")
 
-# 保存结果到JSON文件
-with open(f"{output_dir}/03_results_summary.json", 'w', encoding='utf-8') as f:
-    json.dump(summary, f, ensure_ascii=False, indent=2)
-
-# 创建结果表格
-results_df = pd.DataFrame([
-    ["导弹M1初始位置", f"({solver.M0[0]}, {solver.M0[1]}, {solver.M0[2]})"],
-    ["无人机FY1初始位置", f"({solver.U0[0]}, {solver.U0[1]}, {solver.U0[2]})"],
-    ["真目标位置", f"({solver.T[0]}, {solver.T[1]}, {solver.T[2]})"],
-    ["投放点坐标", f"({S0[0]:.2f}, {S0[1]:.2f}, {S0[2]:.2f})"],
-    ["起爆点坐标", f"({C0[0]:.2f}, {C0[1]:.2f}, {C0[2]:.2f})"],
-    ["投放时刻", f"{solver.t_r} s"],
-    ["起爆时刻", f"{solver.t_e} s"],
-    ["总遮蔽时长", f"{result['total_shielding_time']:.6f} s"],
-    ["遮蔽区间数量", f"{len(result['shielded_intervals'])}个"]
-], columns=["参数", "数值"])
-
-# 保存结果表格
-results_df.to_csv(f"{output_dir}/04_results_table.csv", index=False, encoding='utf-8-sig')
-results_df.to_excel(f"{output_dir}/04_results_table.xlsx", index=False)
-
-print("📋 问题1计算结果汇总:")
-print("=" * 50)
-print(results_df.to_string(index=False))
-print("=" * 50)
-print(f"🎯 **最终答案：对M1的有效遮蔽时长为 {result['total_shielding_time']:.6f} 秒**")
-print("=" * 50)
-
-# 保存详细数据
-detailed_data = pd.DataFrame({
-    '时间(s)': result['times'],
-    '距离(m)': result['distances'],
-    '遮蔽状态': np.array(result['shielded_flags']).astype(int)
-})
-detailed_data.to_csv(f"{output_dir}/05_detailed_data.csv", index=False)
-
-print(f"💾 所有结果已保存到 {output_dir}/ 目录")
-print(f"   - 3D轨迹图: 01_3d_trajectory.html")
-print(f"   - 遮蔽分析图: 02_shielding_analysis.html") 
-print(f"   - 结果汇总: 03_results_summary.json")
-print(f"   - 结果表格: 04_results_table.xlsx")
-print(f"   - 详细数据: 05_detailed_data.csv")
-
-# %%
+print("\n计算完成！")
